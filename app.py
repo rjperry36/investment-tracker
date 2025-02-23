@@ -2,20 +2,42 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import datetime
+import json
+import os
 
 # Web App Title
 st.title("📈 AI Investment Tracker")
 st.write("Live Market Updates & AI-Driven Investment Insights")
 
-# Define Session State for Storing Investments
+# Define Persistent Storage File
+INVESTMENTS_FILE = "investments.json"
+
+def load_investments():
+    if os.path.exists(INVESTMENTS_FILE):
+        with open(INVESTMENTS_FILE, "r") as file:
+            return json.load(file)
+    return []
+
+def save_investments(investments):
+    with open(INVESTMENTS_FILE, "w") as file:
+        json.dump(investments, file)
+
+# Load Investments from File
 if "investments" not in st.session_state:
-    st.session_state["investments"] = []
+    st.session_state["investments"] = load_investments()
 
 # Function to Fetch Real-Time Stock Prices
 def fetch_stock_data(tickers):
     if tickers:
-        data = yf.download(tickers, period="1d", interval="1h")["Close"]
-        return data.iloc[-1]
+        try:
+            data = yf.download(tickers, period="1d", interval="1h")
+            if data.empty:
+                st.warning("No stock data retrieved. Please check ticker symbols.")
+                return {}
+            return data["Close"].iloc[-1]
+        except Exception as e:
+            st.error(f"Error retrieving stock data: {e}")
+            return {}
     return {}
 
 # Function to Analyze AI Models (Russell, Sayjel, Ethan)
@@ -35,15 +57,17 @@ investment_date = st.sidebar.date_input("Date of Investment", datetime.date.toda
 investment_time = st.sidebar.time_input("Time of Investment", datetime.datetime.now().time())
 investment_fees = st.sidebar.number_input("Investment Fees (£)", min_value=0.0, step=1.0)
 
-if st.sidebar.button("Add Investment"):
+if st.sidebar.button("Add Investment", key="add_investment_button"):
     if ticker and investment_amount > 0:
-        st.session_state["investments"].append({
+        new_investment = {
             "Ticker": ticker.upper(),
-            "Date": investment_date,
-            "Time": investment_time,
+            "Date": str(investment_date),
+            "Time": str(investment_time),
             "Amount Invested (£)": investment_amount,
             "Fees (£)": investment_fees
-        })
+        }
+        st.session_state["investments"].append(new_investment)
+        save_investments(st.session_state["investments"])
         st.sidebar.success(f"Added {ticker.upper()} investment on {investment_date}")
     else:
         st.sidebar.error("Please enter a valid ticker and investment amount.")
@@ -61,7 +85,12 @@ if st.session_state["investments"]:
     
         # Improved Table UI
         def highlight_changes(val):
-            return "background-color: #ffcccc;" if val < 0 else "background-color: #ccffcc;"
+            if val > 0:
+                return "background-color: #ccffcc;"  # Green for positive changes
+            elif val < 0:
+                return "background-color: #ffcccc;"  # Red for negative changes
+            else:
+                return "background-color: #ffffcc;"  # Yellow for neutral values
     
         st.dataframe(investment_df.style.applymap(highlight_changes, subset=["Profit/Loss (£)", "Change (%)"]))
     else:
@@ -76,8 +105,17 @@ for model, summary in ai_summary.items():
     st.markdown(f"**{model}**: {summary}")
 
 # Unique Key for Refresh Button to Avoid Duplicate Element Error
-if st.button("🔄 Refresh Data", key="unique_refresh_button"):
-    st.rerun()
+if st.button("🔄 Refresh Data", key="refresh_button_1"):
+    if "last_refresh" not in st.session_state or (datetime.datetime.now() - st.session_state["last_refresh"]).seconds > 2:
+        st.session_state["last_refresh"] = datetime.datetime.now()
+        st.rerun()
 
 # Footer
-st.write("© 2024 RES | Designed by Curiosity")
+import subprocess
+
+try:
+    version = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode("utf-8").strip()
+except:
+    version = "Unknown"
+
+st.write(f"RES Version {version}")
